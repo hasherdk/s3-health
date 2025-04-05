@@ -167,3 +167,109 @@ async def check_bucket_health(
         raise HTTPException(status_code=400, detail={"status": "fail", "reason": str(e)})
     except Exception as e:
         raise HTTPException(status_code=500, detail={"status": "fail", "reason": f"Unexpected error: {str(e)}"})
+
+@app.get(
+    "/buckets/{bucket_name}/usage",
+    status_code=200,
+    summary="Check S3 Bucket Storage Usage",
+    response_description="Storage usage information for the bucket",
+    tags=["Health Checks"]
+)
+async def check_bucket_usage(
+    bucket_name: str = Path(
+        ...,
+        description="Name of the S3 bucket to check",
+        example="my-data-bucket"
+    )
+):
+    """
+    Retrieves storage usage information for an S3 bucket.
+    
+    ## Operation
+    This endpoint performs the following:
+    - Verifies that the bucket exists and is accessible
+    - Calculates total storage used
+    - Counts the number of objects in the bucket
+    
+    ## Response
+    - Returns 200 OK with usage details if the check passes
+    - Returns 500 Internal Server Error if any check fails
+    
+    ## Example
+    ```
+    GET /buckets/my-backup-bucket/usage
+    ```
+    """
+    try:
+        # Create S3 client
+        s3 = boto3.client(
+            "s3",
+            endpoint_url=os.environ.get("S3_ENDPOINT") or "https://s3.amazonaws.com",
+            aws_access_key_id=os.environ.get("S3_KEY"),
+            aws_secret_access_key=os.environ.get("S3_SECRET"),
+        )
+        
+        try:
+            # Initialize counters for total size and object count
+            total_size = 0
+            object_count = 0
+            
+            # Get all objects using pagination
+            paginator = s3.get_paginator('list_objects_v2')
+            
+            # Iterate through each page of objects
+            for page in paginator.paginate(Bucket=bucket_name):
+                if 'Contents' in page:
+                    # Add to object count
+                    page_objects = page['Contents']
+                    object_count += len(page_objects)
+                    
+                    # Add to total size
+                    for obj in page_objects:
+                        total_size += obj.get('Size', 0)
+            
+            # Format size in human-readable format
+            size_mb = total_size / (1024 * 1024)
+            size_gb = size_mb / 1024
+            
+            # Determine the most appropriate unit
+            if size_gb >= 1:
+                size_formatted = f"{size_gb:.2f} GB"
+            else:
+                size_formatted = f"{size_mb:.2f} MB"
+            
+            return {
+                "status": "ok",
+                "bucket": bucket_name,
+                "usage": {
+                    "object_count": object_count,
+                    "total_size_bytes": total_size,
+                    "total_size_formatted": size_formatted
+                }
+            }
+            
+        except ClientError as e:
+            if "AccessDenied" in str(e) and "ListObjects" in str(e):
+                # Try fallback to check if the bucket exists at least
+                try:
+                    s3.get_bucket_location(Bucket=bucket_name)
+                    raise HTTPException(
+                        status_code=500,
+                        detail={
+                            "status": "fail", 
+                            "reason": "Cannot check bucket usage. The 's3:ListBucket' permission is required."
+                        }
+                    )
+                except ClientError as e2:
+                    raise HTTPException(
+                        status_code=500, 
+                        detail={"status": "fail", "reason": f"Error accessing bucket: {str(e2)}"}
+                    )
+            else:
+                raise HTTPException(
+                    status_code=500, 
+                    detail={"status": "fail", "reason": f"Error accessing bucket: {str(e)}"}
+                )
+                
+    except Exception as e:
+        raise HTTPException(status_code=500, detail={"status": "fail", "reason": f"Unexpected error: {str(e)}"})

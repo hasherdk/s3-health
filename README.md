@@ -84,9 +84,37 @@ Example successful response:
 }
 ```
 
+### Check Bucket Storage Usage
+
+```
+GET /buckets/{bucket_name}/usage
+```
+
+Parameters:
+- `bucket_name`: Name of the S3 bucket to check
+
+Response:
+- Status 200: Returns storage usage details
+- Status 500: Check failed with detailed reason
+
+Example successful response:
+```json
+{
+  "status": "ok",
+  "bucket": "my-data-bucket",
+  "usage": {
+    "object_count": 1205,
+    "total_size_bytes": 2416542788,
+    "total_size_formatted": "2.25 GB"
+  }
+}
+```
+
 ## Integration with Uptime Kuma
 
 [Uptime Kuma](https://github.com/louislam/uptime-kuma) is a popular open-source monitoring tool. Here's how to integrate S3 Health with it:
+
+### Basic Integration - Freshness Check
 
 1. Deploy S3 Health as a sidecar container alongside your Uptime Kuma instance
 2. In Uptime Kuma, add a new monitor with the following settings:
@@ -96,6 +124,24 @@ Example successful response:
    - **Follow Redirects**: Yes
    - **Accept Status Codes**: 200
    - Set your desired notification settings
+
+### Advanced Integration - Usage Thresholds
+
+You can also monitor storage usage with JSON Query to verify:
+- Object count is above/below a threshold
+- Storage usage is within acceptable limits
+
+#### Steps to Create a Usage Monitor:
+
+1. In Uptime Kuma, add a new monitor with the following settings:
+   - **Monitor Type**: HTTP(s) - Json Query
+   - **URL**: `http://s3-health:8000/buckets/your-bucket-name/usage`
+   - Set **JSON Query** to one of these examples:
+     - Check object count: `usage.object_count > 10` (Ensures bucket has at least 10 objects)
+     - Check storage size: `usage.total_size_bytes < 5368709120` (Ensures usage is below 5GB)
+   - Set your desired notification settings
+
+This allows you to monitor not just the presence of fresh objects, but also maintain awareness of storage growth and object counts, which can be useful for both backup verification and capacity planning.
 
 ### Docker Compose Example with Uptime Kuma
 
@@ -121,7 +167,6 @@ services:
 volumes:
   uptime-kuma-data:
 ```
-
 
 ## Contributing
 
