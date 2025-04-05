@@ -18,6 +18,16 @@
     "runArgs": [
         "--env-file", "${localWorkspaceFolder}/.devcontainer/secrets.env"
     ],
+    "features": {
+        "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+    },
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-azuretools.vscode-docker"
+            ]
+        }
+    },
 
     // Configure tool-specific properties.
     // "customizations": {},
