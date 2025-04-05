@@ -39,7 +39,7 @@ docker run -d \
 ### Running locally
 
 ```bash
-git clone https://github.com/yourusername/s3-health.git
+git clone https://github.com/hasherdk/s3-health.git
 cd s3-health
 pip install -r requirements.txt
 python src/main.py
@@ -57,10 +57,10 @@ Configure S3 Health using environment variables:
 
 ## API Usage
 
-### Check Bucket Health
+### Check Bucket Freshness
 
 ```
-GET /health/{bucket_name}?max_age=24h
+GET /buckets/{bucket_name}/freshness?max_age=24h
 ```
 
 Parameters:
@@ -91,7 +91,7 @@ Example successful response:
 1. Deploy S3 Health as a sidecar container alongside your Uptime Kuma instance
 2. In Uptime Kuma, add a new monitor with the following settings:
    - **Monitor Type**: HTTP(s)
-   - **URL**: `http://s3-health:8000/health/your-bucket-name?max_age=24h`
+   - **URL**: `http://s3-health:8000/buckets/your-bucket-name/freshness?max_age=24h`
    - **Method**: GET
    - **Follow Redirects**: Yes
    - **Accept Status Codes**: 200

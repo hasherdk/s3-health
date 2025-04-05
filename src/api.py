@@ -38,9 +38,9 @@ def parse_duration(duration_str):
         return timedelta(days=value)
 
 @app.get(
-    "/health/{bucket_name}", 
+    "/buckets/{bucket_name}/freshness", 
     status_code=200,
-    summary="Check S3 Bucket Health",
+    summary="Check S3 Bucket Object Freshness",
     response_description="Health check result with newest object information",
     tags=["Health Checks"]
 )
@@ -73,7 +73,7 @@ async def check_bucket_health(
     
     ## Example
     ```
-    GET /health/my-backup-bucket?max_age=12h
+    GET /buckets/my-backup-bucket/freshness?max_age=12h
     ```
     """
     try:
