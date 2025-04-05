@@ -5,7 +5,18 @@ import os
 from datetime import datetime, timezone, timedelta
 import re
 
-app = FastAPI(title="S3 Health Check API")
+# Initialize FastAPI with more complete metadata for better Swagger docs
+app = FastAPI(
+    title="S3 Health Check API",
+    description="API for checking the health of S3 buckets by verifying the age of the newest object",
+    version="1.0.0",
+    docs_url="/",  # Swagger UI endpoint (default is /docs)
+    redoc_url="/redoc",  # ReDoc endpoint (default is /redoc)
+    openapi_url="/openapi.json",  # OpenAPI schema endpoint
+    license_info={
+        "name": "GPLv3",
+    }
+)
 
 def parse_duration(duration_str):
     """Parse duration strings like '24h', '30m', '1d' into timedelta objects"""
@@ -26,14 +37,44 @@ def parse_duration(duration_str):
     elif unit == 'd':
         return timedelta(days=value)
 
-@app.get("/health/{bucket_name}", status_code=200)
+@app.get(
+    "/health/{bucket_name}", 
+    status_code=200,
+    summary="Check S3 Bucket Health",
+    response_description="Health check result with newest object information",
+    tags=["Health Checks"]
+)
 async def check_bucket_health(
-    bucket_name: str = Path(..., description="Name of the S3 bucket to check"),
-    max_age: str = Query("24h", description="Maximum age of newest object (format: 24h, 30m, 1d)")
+    bucket_name: str = Path(
+        ..., 
+        description="Name of the S3 bucket to check",
+        example="my-data-bucket"
+    ),
+    max_age: str = Query(
+        "24h", 
+        description="Maximum age of newest object (format: 24h, 30m, 1d)",
+        example="12h",
+        regex=r"^\d+[hmd]$"
+    )
 ):
     """
-    Check if the newest object in the bucket is younger than the specified maximum age.
-    Returns 200 OK if check passes, 500 Internal Server Error otherwise.
+    Checks the health of an S3 bucket by verifying the age of the newest object.
+    
+    ## Operation
+    This endpoint performs the following checks:
+    - Verifies that the bucket exists and is accessible
+    - Confirms the bucket contains at least one object
+    - Verifies that the newest object is not older than the specified maximum age
+    
+    ## Response
+    - Returns 200 OK with object details if the check passes
+    - Returns 500 Internal Server Error if any check fails
+    - Returns 400 Bad Request if input parameters are invalid
+    
+    ## Example
+    ```
+    GET /health/my-backup-bucket?max_age=12h
+    ```
     """
     try:
         # Parse max age duration
