@@ -37,6 +37,55 @@ def parse_duration(duration_str):
     elif unit == 'd':
         return timedelta(days=value)
 
+def get_s3_client():
+    """Create and return an S3 client with configured credentials"""
+    return boto3.client(
+        "s3",
+        endpoint_url=os.environ.get("S3_ENDPOINT") or "https://s3.amazonaws.com",
+        aws_access_key_id=os.environ.get("S3_KEY"),
+        aws_secret_access_key=os.environ.get("S3_SECRET"),
+    )
+
+def check_bucket_access(s3, bucket_name):
+    """Check if the bucket exists and is accessible"""
+    try:
+        s3.get_bucket_location(Bucket=bucket_name)
+        return True
+    except ClientError as e:
+        raise HTTPException(
+            status_code=500, 
+            detail={"status": "fail", "reason": f"Error accessing bucket: {str(e)}"}
+        )
+
+def get_bucket_objects(s3, bucket_name):
+    """Get all objects from a bucket using pagination"""
+    try:
+        all_objects = []
+        paginator = s3.get_paginator('list_objects_v2')
+        
+        # Iterate through each page of objects
+        for page in paginator.paginate(Bucket=bucket_name):
+            if 'Contents' in page:
+                all_objects.extend(page['Contents'])
+        
+        return all_objects
+    except ClientError as e:
+        if "AccessDenied" in str(e) and "ListObjects" in str(e):
+            # Check if bucket exists but we lack list permissions
+            check_bucket_access(s3, bucket_name)
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "status": "fail", 
+                    "reason": "Cannot list bucket objects. The 's3:ListBucket' permission is required."
+                }
+            )
+        else:
+            raise HTTPException(
+                status_code=500, 
+                detail={"status": "fail", "reason": f"Error accessing bucket: {str(e)}"}
+            )
+
 @app.get(
     "/buckets/{bucket_name}/freshness", 
     status_code=200,
@@ -83,90 +132,55 @@ async def check_bucket_health(
             max_age_delta = parse_duration(max_age)
         
         # Create S3 client
-        s3 = boto3.client(
-            "s3",
-            endpoint_url=os.environ.get("S3_ENDPOINT") or "https://s3.amazonaws.com",
-            aws_access_key_id=os.environ.get("S3_KEY"),
-            aws_secret_access_key=os.environ.get("S3_SECRET"),
-        )
+        s3 = get_s3_client()
         
-        # First check if we can access the bucket at all
-        try:
-            # Get all objects using pagination to ensure we don't miss any
-            all_objects = []
-            paginator = s3.get_paginator('list_objects_v2')
-            
-            # Iterate through each page of objects
-            for page in paginator.paginate(Bucket=bucket_name):
-                if 'Contents' in page:
-                    all_objects.extend(page['Contents'])
-            
-            if not all_objects:
-                raise HTTPException(
-                    status_code=500, 
-                    detail={"status": "fail", "reason": f"Bucket '{bucket_name}' is empty"}
-                )
-            
-            # Sort objects by LastModified (newest first)
-            objects = sorted(all_objects, key=lambda obj: obj['LastModified'], reverse=True)
-            
-            # Get the newest object
-            newest_object = objects[0]
-            
-            # Calculate age
-            now = datetime.now(timezone.utc)
-            last_modified = newest_object['LastModified']
-            age = now - last_modified
-            
-            # Only check age if max_age was provided
-            if max_age_delta and age > max_age_delta:
-                raise HTTPException(
-                    status_code=500,
-                    detail={
-                        "status": "fail",
-                        "reason": f"Newest object is too old ({age.total_seconds():.0f} seconds, max age: {max_age_delta.total_seconds():.0f} seconds)",
-                        "newest_object": {
-                            "key": newest_object['Key'],
-                            "last_modified": last_modified.isoformat(),
-                            "age_seconds": age.total_seconds()
-                        }
-                    }
-                )
-            
-            return {
-                "status": "ok",
-                "newest_object": {
-                    "key": newest_object['Key'],
-                    "last_modified": last_modified.isoformat(),
-                    "age_seconds": age.total_seconds()
-                }
+        # Get all objects in the bucket
+        all_objects = get_bucket_objects(s3, bucket_name)
+        
+        if not all_objects:
+            raise HTTPException(
+                status_code=500, 
+                detail={"status": "fail", "reason": f"Bucket '{bucket_name}' is empty"}
+            )
+        
+        # Sort objects by LastModified (newest first)
+        objects = sorted(all_objects, key=lambda obj: obj['LastModified'], reverse=True)
+        
+        # Get the newest object
+        newest_object = objects[0]
+        
+        # Calculate age
+        now = datetime.now(timezone.utc)
+        last_modified = newest_object['LastModified']
+        age = now - last_modified
+        
+        # Prepare response with newest object info
+        response = {
+            "status": "ok",
+            "newest_object": {
+                "key": newest_object['Key'],
+                "last_modified": last_modified.isoformat(),
+                "age_seconds": age.total_seconds()
             }
+        }
+        
+        # Only check age if max_age was provided
+        if max_age_delta and age > max_age_delta:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "status": "fail",
+                    "reason": f"Newest object is too old ({age.total_seconds():.0f} seconds, max age: {max_age_delta.total_seconds():.0f} seconds)",
+                    "newest_object": response["newest_object"]
+                }
+            )
+        
+        return response
             
-        except ClientError as e:
-            if "AccessDenied" in str(e) and "ListObjects" in str(e):
-                # Try fallback to check if the bucket exists at least
-                try:
-                    s3.get_bucket_location(Bucket=bucket_name)
-                    raise HTTPException(
-                        status_code=500,
-                        detail={
-                            "status": "fail", 
-                            "reason": "Cannot check newest object age. The 's3:ListBucket' permission is required."
-                        }
-                    )
-                except ClientError as e2:
-                    raise HTTPException(
-                        status_code=500, 
-                        detail={"status": "fail", "reason": f"Error accessing bucket: {str(e2)}"}
-                    )
-            else:
-                raise HTTPException(
-                    status_code=500, 
-                    detail={"status": "fail", "reason": f"Error accessing bucket: {str(e)}"}
-                )
-                
     except ValueError as e:
         raise HTTPException(status_code=400, detail={"status": "fail", "reason": str(e)})
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail={"status": "fail", "reason": f"Unexpected error: {str(e)}"})
 
@@ -204,74 +218,40 @@ async def check_bucket_usage(
     """
     try:
         # Create S3 client
-        s3 = boto3.client(
-            "s3",
-            endpoint_url=os.environ.get("S3_ENDPOINT") or "https://s3.amazonaws.com",
-            aws_access_key_id=os.environ.get("S3_KEY"),
-            aws_secret_access_key=os.environ.get("S3_SECRET"),
-        )
+        s3 = get_s3_client()
         
-        try:
-            # Initialize counters for total size and object count
-            total_size = 0
-            object_count = 0
-            
-            # Get all objects using pagination
-            paginator = s3.get_paginator('list_objects_v2')
-            
-            # Iterate through each page of objects
-            for page in paginator.paginate(Bucket=bucket_name):
-                if 'Contents' in page:
-                    # Add to object count
-                    page_objects = page['Contents']
-                    object_count += len(page_objects)
-                    
-                    # Add to total size
-                    for obj in page_objects:
-                        total_size += obj.get('Size', 0)
-            
-            # Format size in human-readable format
-            size_mb = total_size / (1024 * 1024)
-            size_gb = size_mb / 1024
-            
-            # Determine the most appropriate unit
-            if size_gb >= 1:
-                size_formatted = f"{size_gb:.2f} GB"
-            else:
-                size_formatted = f"{size_mb:.2f} MB"
-            
-            return {
-                "status": "ok",
-                "bucket": bucket_name,
-                "usage": {
-                    "object_count": object_count,
-                    "total_size_bytes": total_size,
-                    "total_size_formatted": size_formatted
-                }
+        # Get all objects in the bucket
+        all_objects = get_bucket_objects(s3, bucket_name)
+        
+        # Initialize counters for total size and object count
+        total_size = 0
+        object_count = len(all_objects)
+        
+        # Calculate total size
+        for obj in all_objects:
+            total_size += obj.get('Size', 0)
+        
+        # Format size in human-readable format
+        size_mb = total_size / (1024 * 1024)
+        size_gb = size_mb / 1024
+        
+        # Determine the most appropriate unit
+        if size_gb >= 1:
+            size_formatted = f"{size_gb:.2f} GB"
+        else:
+            size_formatted = f"{size_mb:.2f} MB"
+        
+        return {
+            "status": "ok",
+            "bucket": bucket_name,
+            "usage": {
+                "object_count": object_count,
+                "total_size_bytes": total_size,
+                "total_size_formatted": size_formatted
             }
+        }
             
-        except ClientError as e:
-            if "AccessDenied" in str(e) and "ListObjects" in str(e):
-                # Try fallback to check if the bucket exists at least
-                try:
-                    s3.get_bucket_location(Bucket=bucket_name)
-                    raise HTTPException(
-                        status_code=500,
-                        detail={
-                            "status": "fail", 
-                            "reason": "Cannot check bucket usage. The 's3:ListBucket' permission is required."
-                        }
-                    )
-                except ClientError as e2:
-                    raise HTTPException(
-                        status_code=500, 
-                        detail={"status": "fail", "reason": f"Error accessing bucket: {str(e2)}"}
-                    )
-            else:
-                raise HTTPException(
-                    status_code=500, 
-                    detail={"status": "fail", "reason": f"Error accessing bucket: {str(e)}"}
-                )
-                
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail={"status": "fail", "reason": f"Unexpected error: {str(e)}"})
