@@ -51,8 +51,8 @@ async def check_bucket_health(
         example="my-data-bucket"
     ),
     max_age: str = Query(
-        "24h", 
-        description="Maximum age of newest object (format: 24h, 30m, 1d)",
+        None, 
+        description="Optional maximum age of newest object (format: 24h, 30m, 1d). If not provided, only reports status without age validation.",
         example="12h",
         regex=r"^\d+[hmd]$"
     )
@@ -64,7 +64,7 @@ async def check_bucket_health(
     This endpoint performs the following checks:
     - Verifies that the bucket exists and is accessible
     - Confirms the bucket contains at least one object
-    - Verifies that the newest object is not older than the specified maximum age
+    - If max_age is provided, verifies that the newest object is not older than the specified maximum age
     
     ## Response
     - Returns 200 OK with object details if the check passes
@@ -77,8 +77,10 @@ async def check_bucket_health(
     ```
     """
     try:
-        # Parse max age duration
-        max_age_delta = parse_duration(max_age)
+        # Parse max age duration only if provided
+        max_age_delta = None
+        if max_age:
+            max_age_delta = parse_duration(max_age)
         
         # Create S3 client
         s3 = boto3.client(
@@ -116,8 +118,8 @@ async def check_bucket_health(
             last_modified = newest_object['LastModified']
             age = now - last_modified
             
-            # Check if the newest object is older than the maximum allowed age
-            if age > max_age_delta:
+            # Only check age if max_age was provided
+            if max_age_delta and age > max_age_delta:
                 raise HTTPException(
                     status_code=500,
                     detail={

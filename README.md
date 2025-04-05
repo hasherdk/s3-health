@@ -65,11 +65,11 @@ GET /buckets/{bucket_name}/freshness?max_age=24h
 
 Parameters:
 - `bucket_name`: Name of the S3 bucket to check
-- `max_age`: Maximum age of newest object (format: 24h, 30m, 1d), defaults to 24h
+- `max_age`: (Optional) Maximum age of newest object (format: 24h, 30m, 1d). If not provided, only reports status without age validation.
 
 Response:
-- Status 200: Bucket health is good, returns newest object details
-- Status 500: Health check failed with detailed reason
+- Status 200: Returns newest object details, only validates age when max_age is provided
+- Status 500: Freshness check failed with detailed reason
 - Status 400: Invalid request parameters
 
 Example successful response:
