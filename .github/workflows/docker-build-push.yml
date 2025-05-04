@@ -38,7 +38,7 @@ jobs:
             type=sha,format=short
             type=ref,event=branch
             type=ref,event=pr
-            latest
+            ${{ github.ref == 'refs/heads/main' && 'latest' || '' }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v4
