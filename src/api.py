@@ -255,3 +255,28 @@ async def check_bucket_usage(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail={"status": "fail", "reason": f"Unexpected error: {str(e)}"})
+
+# Health check endpoint
+@app.get(
+    "/health",
+    status_code=200,
+    summary="Health Check Endpoint",
+    response_description="Indicates if the API is running",
+    tags=["Health Checks"]
+)
+async def health_check():
+    """
+    Simple health check endpoint to verify that the API is running.
+    
+    ## Operation
+    This endpoint returns a simple status message.
+    
+    ## Response
+    - Returns 200 OK with status "ok"
+    
+    ## Example
+    ```
+    GET /health
+    ```
+    """
+    return {"status": "ok"}
