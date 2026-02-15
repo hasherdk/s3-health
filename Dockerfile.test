@@ -1,0 +1,15 @@
+FROM python:3.11-slim
+WORKDIR /app
+
+# Install runtime deps + test tools
+COPY requirements-test.txt /app/
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc build-essential curl && \
+    python -m pip install --upgrade pip && \
+    python -m pip install --no-cache-dir -r /app/requirements-test.txt
+
+# Copy tests into the image
+COPY src/tests /tests
+
+WORKDIR /
+CMD ["pytest", "-q", "/tests"]

@@ -1,0 +1,39 @@
+name: CI - Containerized Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Log in to DockerHub (anonymous)
+        run: echo "No login required for public images"
+
+      - name: Install docker compose (plugin)
+        run: |
+          sudo apt-get update && sudo apt-get install -y curl jq
+          DOCKER_CLI_EXPERIMENTAL=enabled
+
+      - name: Run docker-compose tests (fail on test failure)
+        run: |
+          # Run compose and abort when any container exits; use tests container exit code as overall exit
+          docker compose -f docker-compose.test.yml up --build --abort-on-container-exit --exit-code-from tests
+        timeout-minutes: 30
+
+      - name: Fetch test logs and cleanup
+        if: always()
+        run: |
+          docker compose -f docker-compose.test.yml logs --no-color tests || true
+          docker compose -f docker-compose.test.yml down --volumes --remove-orphans || true

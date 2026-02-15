@@ -178,5 +178,17 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
+## Running tests (containerized)
+
+You can run the container-based tests locally. This will bring up MinIO, build the app image, run the pytest suite inside a test container and then clean up.
+
+From the repo root:
+
+```bash
+./scripts/run_tests.sh
+```
+
+In VS Code you can run the pre-configured task "Run containerized tests" (Terminal -> Run Task...). This calls the same script and shows logs in the IDE.
+
 ## License
 This project is licensed under the GPLv3 License - see the [LICENSE](LICENSE) file for details.

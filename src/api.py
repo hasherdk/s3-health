@@ -18,7 +18,7 @@ app = FastAPI(
     }
 )
 
-def parse_duration(duration_str):
+def parse_duration(duration_str: str) -> timedelta:
     """Parse duration strings like '24h', '30m', '1d' into timedelta objects"""
     if not duration_str:
         return timedelta(hours=24)  # Default 24 hours
@@ -36,6 +36,8 @@ def parse_duration(duration_str):
         return timedelta(minutes=value)
     elif unit == 'd':
         return timedelta(days=value)
+    
+    raise ValueError(f"Invalid time unit in duration: {unit}. Use 'h', 'm', or 'd'.")
 
 def get_s3_client():
     """Create and return an S3 client with configured credentials"""
@@ -46,7 +48,7 @@ def get_s3_client():
         aws_secret_access_key=os.environ.get("S3_SECRET"),
     )
 
-def check_bucket_access(s3, bucket_name):
+def check_bucket_access(s3, bucket_name: str) -> bool:
     """Check if the bucket exists and is accessible"""
     try:
         s3.get_bucket_location(Bucket=bucket_name)
@@ -57,7 +59,7 @@ def check_bucket_access(s3, bucket_name):
             detail={"status": "fail", "reason": f"Error accessing bucket: {str(e)}"}
         )
 
-def get_bucket_objects(s3, bucket_name):
+def get_bucket_objects(s3, bucket_name: str):
     """Get all objects from a bucket using pagination"""
     try:
         all_objects = []
