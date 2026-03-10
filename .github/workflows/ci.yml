@@ -1,0 +1,112 @@
+name: CI/CD Pipeline
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      custom_tag:
+        description: 'Custom tag for pre-release (e.g., v1.0.0-rc1)'
+        required: false
+        type: string
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Run test suite
+        run: ./scripts/run_tests.sh
+
+  build-and-push:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine tags
+        id: tags
+        run: |
+          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          BASE_IMAGE="ghcr.io/${REPO_LOWER}"
+          
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            # Pull request: tag as pr-{number}
+            TAGS="${BASE_IMAGE}:pr-${{ github.event.pull_request.number }}"
+          elif [ "${{ github.event_name }}" == "push" ] && [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            # Push to main: tag as latest and versioned
+            VERSION="v1.0.${{ github.run_number }}"
+            TAGS="${BASE_IMAGE}:${VERSION},${BASE_IMAGE}:latest"
+          elif [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            # Manual trigger: use custom tag if provided, otherwise use branch-{sha}
+            if [ -n "${{ inputs.custom_tag }}" ]; then
+              TAGS="${BASE_IMAGE}:${{ inputs.custom_tag }}"
+            else
+              BRANCH_NAME=$(echo "${{ github.ref_name }}" | sed 's/[^a-zA-Z0-9]/-/g')
+              SHA_SHORT=$(echo "${{ github.sha }}" | cut -c1-7)
+              TAGS="${BASE_IMAGE}:${BRANCH_NAME}-${SHA_SHORT}"
+            fi
+          else
+            # Fallback: branch-sha
+            BRANCH_NAME=$(echo "${{ github.ref_name }}" | sed 's/[^a-zA-Z0-9]/-/g')
+            SHA_SHORT=$(echo "${{ github.sha }}" | cut -c1-7)
+            TAGS="${BASE_IMAGE}:${BRANCH_NAME}-${SHA_SHORT}"
+          fi
+          
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+          echo "Generated tags: ${TAGS}"
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+            VERSION=${{ steps.tags.outputs.tags }}
+
+      - name: Image summary
+        run: |
+          echo "## Docker Image Built and Pushed 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Tags:** \`${{ steps.tags.outputs.tags }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Registry:** ghcr.io" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Pull the image:" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          IFS=',' read -ra TAG_ARRAY <<< "${{ steps.tags.outputs.tags }}"
+          echo "docker pull ${TAG_ARRAY[0]}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY

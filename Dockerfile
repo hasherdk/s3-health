@@ -1,5 +1,11 @@
 # Multi-stage build: builder creates a virtualenv and installs dependencies,
 # final stage uses a distroless python runtime (nonroot) for minimal attack surface.
+
+# Build arguments for metadata
+ARG BUILD_DATE
+ARG VCS_REF
+ARG VERSION
+
 FROM python:3.11-slim-bullseye AS builder
 
 # Set working dir
@@ -24,6 +30,14 @@ RUN chmod -R a+rX /app/.packages /src
 
 
 FROM gcr.io/distroless/python3:nonroot
+
+# OCI metadata labels
+LABEL org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.title="s3-health" \
+      org.opencontainers.image.description="Lightweight FastAPI service for monitoring S3 bucket health" \
+      org.opencontainers.image.licenses="GPL-3.0"
 
 # Copy installed packages and application from the builder
 COPY --from=builder /app/.packages /app/.packages
