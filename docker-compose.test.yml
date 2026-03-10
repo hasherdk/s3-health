@@ -36,13 +36,17 @@ services:
       S3_ENDPOINT: http://minio:9000
       S3_KEY: minioadmin
       S3_SECRET: minioadmin
+      PYTHONPATH: /app
+      RUNNING_IN_CONTAINER: "true"
     depends_on:
       minio:
         condition: service_healthy
       app_under_test:
         condition: service_started
     volumes:
-      # Mount tests as read-write so pytest can create its .pytest_cache inside the bind mount
-      - ./src/tests:/tests:rw
+      # Mount src directory so tests can import modules
+      - ./src:/app/src:rw
+      # Mount Docker socket for testcontainers
+      - /var/run/docker.sock:/var/run/docker.sock
 
 volumes: {}

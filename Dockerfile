@@ -6,7 +6,7 @@ ARG BUILD_DATE
 ARG VCS_REF
 ARG VERSION
 
-FROM python:3.11-slim-bullseye AS builder
+FROM python:3.14-slim AS builder
 
 # Set working dir
 WORKDIR /src

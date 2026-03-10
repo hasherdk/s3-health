@@ -1,8 +1,8 @@
-FROM python:3.11-slim
+FROM python:3.14-slim
 WORKDIR /app
 
 # Install runtime deps + test tools
-COPY requirements-test.txt /app/
+COPY requirements.txt requirements-test.txt /app/
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc build-essential curl && \
     python -m pip install --upgrade pip && \
