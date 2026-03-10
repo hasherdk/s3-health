@@ -99,13 +99,13 @@ async def check_bucket_health(
     bucket_name: str = Path(
         ..., 
         description="Name of the S3 bucket to check",
-        example="my-data-bucket"
+        examples=["my-data-bucket"]
     ),
     max_age: str = Query(
         None, 
         description="Optional maximum age of newest object (format: 24h, 30m, 1d). If not provided, only reports status without age validation.",
-        example="12h",
-        regex=r"^\d+[hmd]$"
+        examples=["12h"],
+        pattern=r"^\d+[hmd]$"
     )
 ):
     """
@@ -197,7 +197,7 @@ async def check_bucket_usage(
     bucket_name: str = Path(
         ...,
         description="Name of the S3 bucket to check",
-        example="my-data-bucket"
+        examples=["my-data-bucket"]
     )
 ):
     """

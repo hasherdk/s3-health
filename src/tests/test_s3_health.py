@@ -4,6 +4,7 @@ from datetime import datetime, timezone, timedelta
 
 import boto3
 import httpx
+import pytest
 
 MINIO_ENDPOINT = os.environ.get("S3_ENDPOINT", "http://localhost:9000")
 ACCESS_KEY = os.environ.get("S3_KEY", "minioadmin")
@@ -31,11 +32,11 @@ def wait_for_http(url, timeout=10):
     raise RuntimeError(f"Service at {url} did not become ready in {timeout}s")
 
 
-def test_health_endpoint_is_up():
+def test_health_endpoint_is_up(requires_docker_stack):
     assert wait_for_http("http://app_under_test:8000/health") or wait_for_http("http://localhost:8000/health")
 
 
-def test_bucket_freshness_and_usage(tmp_path):
+def test_bucket_freshness_and_usage(tmp_path, requires_docker_stack):
     s3 = s3_client()
     bucket = "test-bucket"
 
