@@ -8,8 +8,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python -m pip install --upgrade pip && \
     python -m pip install --no-cache-dir -r /app/requirements-test.txt
 
-# Copy tests into the image
-COPY src/tests /tests
+# Tests are NOT baked into the image; they are provided at runtime via the
+# volume mount ./src:/app/src defined in docker-compose.test.yml. This means
+# the live source is always used without requiring a rebuild.
 
 WORKDIR /
-CMD ["pytest", "-q", "/tests"]
+CMD ["pytest", "-q", "/app/src/tests"]

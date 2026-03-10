@@ -38,13 +38,19 @@ services:
       S3_SECRET: minioadmin
       PYTHONPATH: /app
       RUNNING_IN_CONTAINER: "true"
+      # Ryuk (the testcontainers reaper) tries to connect back to itself over an
+      # exposed port that is unreachable from inside the container network when
+      # Docker is running on a remote host (e.g. the host machine or GitHub CI).
+      # Disabling it is safe here because the test's finally-block calls minio.stop().
+      TESTCONTAINERS_RYUK_DISABLED: "true"
     depends_on:
       minio:
         condition: service_healthy
       app_under_test:
         condition: service_started
     volumes:
-      # Mount src directory so tests can import modules
+      # Mount src directory so tests can import modules AND so the live test
+      # source is used without requiring an image rebuild.
       - ./src:/app/src:rw
       # Mount Docker socket for testcontainers
       - /var/run/docker.sock:/var/run/docker.sock
