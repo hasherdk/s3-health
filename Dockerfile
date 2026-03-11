@@ -1,6 +1,6 @@
 # Multi-stage build: builder creates a virtualenv and installs dependencies,
 # final stage uses a distroless python runtime (nonroot) for minimal attack surface.
-FROM python:3.11-slim-bullseye AS builder
+FROM python:3.13-slim-bullseye AS builder
 
 # Set working dir
 WORKDIR /src

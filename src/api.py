@@ -22,28 +22,46 @@ def parse_duration(duration_str):
     """Parse duration strings like '24h', '30m', '1d' into timedelta objects"""
     if not duration_str:
         return timedelta(hours=24)  # Default 24 hours
-    
+
     match = re.match(r'^(\d+)([hmd])$', duration_str)
     if not match:
         raise ValueError(f"Invalid duration format: {duration_str}. Use format like '24h', '60m', or '2d'")
-    
+
     value, unit = match.groups()
     value = int(value)
-    
+
     if unit == 'h':
         return timedelta(hours=value)
     elif unit == 'm':
         return timedelta(minutes=value)
     elif unit == 'd':
         return timedelta(days=value)
+    else:
+        raise ValueError(f"Invalid time unit: {unit}")
+
+def parse_bool_env(var_name, default=True):
+    """Parse a boolean environment variable from common truthy and falsy strings"""
+    value = os.environ.get(var_name)
+    if value is None:
+        return default
+
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+
+    return default
 
 def get_s3_client():
     """Create and return an S3 client with configured credentials"""
+    verify_tls = parse_bool_env("S3_VERIFY_TLS", default=True)
     return boto3.client(
         "s3",
         endpoint_url=os.environ.get("S3_ENDPOINT") or "https://s3.amazonaws.com",
         aws_access_key_id=os.environ.get("S3_KEY"),
         aws_secret_access_key=os.environ.get("S3_SECRET"),
+        verify=verify_tls,
     )
 
 def check_bucket_access(s3, bucket_name):
@@ -53,7 +71,7 @@ def check_bucket_access(s3, bucket_name):
         return True
     except ClientError as e:
         raise HTTPException(
-            status_code=500, 
+            status_code=500,
             detail={"status": "fail", "reason": f"Error accessing bucket: {str(e)}"}
         )
 
@@ -62,12 +80,12 @@ def get_bucket_objects(s3, bucket_name):
     try:
         all_objects = []
         paginator = s3.get_paginator('list_objects_v2')
-        
+
         # Iterate through each page of objects
         for page in paginator.paginate(Bucket=bucket_name):
             if 'Contents' in page:
                 all_objects.extend(page['Contents'])
-        
+
         return all_objects
     except ClientError as e:
         if "AccessDenied" in str(e) and "ListObjects" in str(e):
@@ -76,18 +94,18 @@ def get_bucket_objects(s3, bucket_name):
             raise HTTPException(
                 status_code=500,
                 detail={
-                    "status": "fail", 
+                    "status": "fail",
                     "reason": "Cannot list bucket objects. The 's3:ListBucket' permission is required."
                 }
             )
         else:
             raise HTTPException(
-                status_code=500, 
+                status_code=500,
                 detail={"status": "fail", "reason": f"Error accessing bucket: {str(e)}"}
             )
 
 @app.get(
-    "/buckets/{bucket_name}/freshness", 
+    "/buckets/{bucket_name}/freshness",
     status_code=200,
     summary="Check S3 Bucket Object Freshness",
     response_description="Health check result with newest object information",
@@ -95,12 +113,12 @@ def get_bucket_objects(s3, bucket_name):
 )
 async def check_bucket_health(
     bucket_name: str = Path(
-        ..., 
+        ...,
         description="Name of the S3 bucket to check",
         example="my-data-bucket"
     ),
     max_age: str = Query(
-        None, 
+        None,
         description="Optional maximum age of newest object (format: 24h, 30m, 1d). If not provided, only reports status without age validation.",
         example="12h",
         regex=r"^\d+[hmd]$"
@@ -108,18 +126,18 @@ async def check_bucket_health(
 ):
     """
     Checks the health of an S3 bucket by verifying the age of the newest object.
-    
+
     ## Operation
     This endpoint performs the following checks:
     - Verifies that the bucket exists and is accessible
     - Confirms the bucket contains at least one object
     - If max_age is provided, verifies that the newest object is not older than the specified maximum age
-    
+
     ## Response
     - Returns 200 OK with object details if the check passes
     - Returns 500 Internal Server Error if any check fails
     - Returns 400 Bad Request if input parameters are invalid
-    
+
     ## Example
     ```
     GET /buckets/my-backup-bucket/freshness?max_age=12h
@@ -130,30 +148,30 @@ async def check_bucket_health(
         max_age_delta = None
         if max_age:
             max_age_delta = parse_duration(max_age)
-        
+
         # Create S3 client
         s3 = get_s3_client()
-        
+
         # Get all objects in the bucket
         all_objects = get_bucket_objects(s3, bucket_name)
-        
+
         if not all_objects:
             raise HTTPException(
-                status_code=500, 
+                status_code=500,
                 detail={"status": "fail", "reason": f"Bucket '{bucket_name}' is empty"}
             )
-        
+
         # Sort objects by LastModified (newest first)
         objects = sorted(all_objects, key=lambda obj: obj['LastModified'], reverse=True)
-        
+
         # Get the newest object
         newest_object = objects[0]
-        
+
         # Calculate age
         now = datetime.now(timezone.utc)
         last_modified = newest_object['LastModified']
         age = now - last_modified
-        
+
         # Prepare response with newest object info
         response = {
             "status": "ok",
@@ -163,7 +181,7 @@ async def check_bucket_health(
                 "age_seconds": age.total_seconds()
             }
         }
-        
+
         # Only check age if max_age was provided
         if max_age_delta and age > max_age_delta:
             raise HTTPException(
@@ -174,9 +192,9 @@ async def check_bucket_health(
                     "newest_object": response["newest_object"]
                 }
             )
-        
+
         return response
-            
+
     except ValueError as e:
         raise HTTPException(status_code=400, detail={"status": "fail", "reason": str(e)})
     except HTTPException:
@@ -200,17 +218,17 @@ async def check_bucket_usage(
 ):
     """
     Retrieves storage usage information for an S3 bucket.
-    
+
     ## Operation
     This endpoint performs the following:
     - Verifies that the bucket exists and is accessible
     - Calculates total storage used
     - Counts the number of objects in the bucket
-    
+
     ## Response
     - Returns 200 OK with usage details if the check passes
     - Returns 500 Internal Server Error if any check fails
-    
+
     ## Example
     ```
     GET /buckets/my-backup-bucket/usage
@@ -219,28 +237,28 @@ async def check_bucket_usage(
     try:
         # Create S3 client
         s3 = get_s3_client()
-        
+
         # Get all objects in the bucket
         all_objects = get_bucket_objects(s3, bucket_name)
-        
+
         # Initialize counters for total size and object count
         total_size = 0
         object_count = len(all_objects)
-        
+
         # Calculate total size
         for obj in all_objects:
             total_size += obj.get('Size', 0)
-        
+
         # Format size in human-readable format
         size_mb = total_size / (1024 * 1024)
         size_gb = size_mb / 1024
-        
+
         # Determine the most appropriate unit
         if size_gb >= 1:
             size_formatted = f"{size_gb:.2f} GB"
         else:
             size_formatted = f"{size_mb:.2f} MB"
-        
+
         return {
             "status": "ok",
             "bucket": bucket_name,
@@ -250,7 +268,7 @@ async def check_bucket_usage(
                 "total_size_formatted": size_formatted
             }
         }
-            
+
     except HTTPException:
         raise
     except Exception as e:
