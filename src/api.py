@@ -36,6 +36,8 @@ def parse_duration(duration_str):
         return timedelta(minutes=value)
     elif unit == 'd':
         return timedelta(days=value)
+    else:
+        raise ValueError(f"Invalid time unit: {unit}")
 
 def parse_bool_env(var_name, default=True):
     """Parse a boolean environment variable from common truthy and falsy strings"""
