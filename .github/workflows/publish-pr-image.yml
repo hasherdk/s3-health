@@ -1,0 +1,84 @@
+name: Publish PR image
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+  packages: write
+
+concurrency:
+  group: preview-${{ github.event.workflow_run.head_repository.id }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # Never checkout PR code, execute artifacts, or restore PR-controlled caches here.
+      # Derive every destination from GitHub API metadata, not artifact contents.
+      - uses: actions/github-script@v8
+        id: pr
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            if (run.repository.full_name !== context.repo.owner + '/' + context.repo.repo) {
+              throw new Error('Unexpected source repository');
+            }
+            // Fork runs can have an empty pull_requests array.
+            const prs = await github.paginate(github.rest.pulls.list, {
+              ...context.repo, state: 'open', base: 'main', per_page: 100
+            });
+            const pr = prs.find(p => p.head.sha === run.head_sha &&
+              p.head.repo?.id === run.head_repository.id && p.head.ref === run.head_branch);
+            if (!pr) {
+              core.notice('No current open PR matches this run; skipping stale/closed build');
+              return;
+            }
+            core.setOutput('number', String(pr.number));
+            core.setOutput('sha', pr.head.sha);
+      - uses: actions/download-artifact@v5
+        if: steps.pr.outputs.number
+        with:
+          pattern: pr-image-*
+          path: images
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install image copy tool
+        if: steps.pr.outputs.number
+        run: sudo apt-get update && sudo apt-get install -y skopeo
+      - uses: docker/setup-buildx-action@v4
+        if: steps.pr.outputs.number
+      - uses: docker/login-action@v3
+        if: steps.pr.outputs.number
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Copy images and publish preview manifest
+        if: steps.pr.outputs.number
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}-pr
+          PR: ${{ steps.pr.outputs.number }}
+          SHA: ${{ steps.pr.outputs.sha }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            skopeo copy --authfile "$HOME/.docker/config.json" \
+              "docker-archive:images/pr-image-$arch/image.tar" \
+              "docker://$IMAGE:run-$RUN_ID-$RUN_ATTEMPT-$arch"
+          done
+          docker buildx imagetools create \
+            -t "$IMAGE:pr-$PR" -t "$IMAGE:pr-$PR-sha-$SHA" \
+            "$IMAGE:run-$RUN_ID-$RUN_ATTEMPT-amd64" \
+            "$IMAGE:run-$RUN_ID-$RUN_ATTEMPT-arm64"
+          echo "Preview: \`docker pull $IMAGE:pr-$PR\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Commit: \`$IMAGE:pr-$PR-sha-$SHA\`" >> "$GITHUB_STEP_SUMMARY"

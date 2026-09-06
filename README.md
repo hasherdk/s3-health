@@ -33,7 +33,7 @@ docker run -d \
   -e S3_SECRET=your_secret_key \
   -e S3_ENDPOINT=https://s3.amazonaws.com \
   -p 8000:8000 \
-  s3-health:latest
+  ghcr.io/hasherdk/s3-health:latest
 ```
 
 ### Running locally
@@ -54,6 +54,7 @@ Configure S3 Health using environment variables:
 | `S3_KEY` | AWS access key ID with S3 permissions | - |
 | `S3_SECRET` | AWS secret access key | - |
 | `S3_ENDPOINT` | S3 endpoint URL | https://s3.amazonaws.com |
+| `S3_VERIFY_TLS` | Verify S3 TLS certificates; disable only for trusted test endpoints | `true` |
 
 ## API Usage
 
@@ -70,7 +71,7 @@ Parameters:
 Response:
 - Status 200: Returns newest object details, only validates age when max_age is provided
 - Status 500: Freshness check failed with detailed reason
-- Status 400: Invalid request parameters
+- Status 422: Invalid `max_age` query format
 
 Example successful response:
 ```json
@@ -167,6 +168,65 @@ services:
 volumes:
   uptime-kuma-data:
 ```
+
+## Tests and container publishing
+
+Run the test suite without S3 credentials or a live bucket:
+
+```bash
+python -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
+docker build -t s3-health:ci .
+bash tests/container-smoke.sh s3-health:ci
+```
+
+Every PR to `main`, including Dependabot and forks, runs pytest, builds native
+AMD64 and ARM64 images, and checks `/health`, the Docker healthcheck, and non-root
+execution. PR CI has read-only permissions and does not log into GHCR. GitHub
+may require maintainer approval before running a first-time contributor's CI.
+
+After CI succeeds, a separate `workflow_run` workflow copies the tested image
+artifacts into **`ghcr.io/hasherdk/s3-health-pr`** and combines both architectures:
+
+```bash
+docker pull ghcr.io/hasherdk/s3-health-pr:pr-63
+# Pin validation to a particular PR head commit using its full SHA:
+docker pull ghcr.io/hasherdk/s3-health-pr:pr-63-sha-<full-head-sha>
+```
+
+Use that image in your existing Docker/Compose deployment for server validation.
+These images contain unreviewed PR code. The publisher never checks out or runs
+that code: it only copies image data, with destinations derived from GitHub API
+metadata. Closed PRs and runs whose head is no longer current are skipped.
+PR CI tests GitHub's merge ref (the proposed merge into `main`); the SHA in the
+preview tag identifies the PR head, not the synthetic merge commit. Rerunning a
+build can refresh the tag; use an image digest for an immutable deployment.
+
+Preview images use a separate package so they cannot change the production
+package's newest upload or its `latest` tag. The production workflow publishes
+`ghcr.io/hasherdk/s3-health:latest` and `sha-<full-main-sha>` for `main` only,
+after tests and both architecture smoke checks pass. Manual production runs
+must also target `main`. The legacy `beta` tag is no longer updated; existing
+registry tags are not deleted by these workflows.
+
+### One-time setup and operational notes
+
+- The PR publisher must first be merged into the default branch before GitHub
+  will trigger it. This PR can validate CI, but cannot bootstrap its own publisher.
+- After the first preview upload, set the `s3-health-pr` package visibility to
+  public if anonymous server pulls are desired. Otherwise authenticate the
+  server with a token that can read that package. Ensure this repository's
+  Actions have write access to both packages if they already exist.
+- Require the `test` and both `container` checks in branch protection to enforce
+  the CI gate before merging. Workflow files alone do not enable branch protection.
+- Image artifacts expire after three days. Rerun CI if a delayed publisher no
+  longer has its artifacts. Registry previews and per-run architecture tags
+  remain until removed; no automatic package deletion is enabled.
+- GitHub controls the package page's suggested pull command. The documented
+  production command is `docker pull ghcr.io/hasherdk/s3-health:latest`; a digest
+  shown in GitHub's UI still refers to a specific image, independently of tags.
 
 ## Contributing
 
